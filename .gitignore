@@ -1,0 +1,20 @@
+# 1. Ambiente Virtual
+.venv/
+
+# 2. Arquivos Temporários do Python
+__pycache__/
+*.pyc
+
+# 3. Cache de Testes
+.pytest_cache/
+
+# 4. Variáveis Secretas
+.env
+
+# 5. Data Lakehouse Local (Armazenamento Delta)
+storage/
+metastore_db/
+derby.log
+
+# 6. Checkpoints do Jupyter
+.ipynb_checkpoints/
