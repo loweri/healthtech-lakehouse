@@ -12,6 +12,7 @@ from pyspark.sql import SparkSession
 from delta import configure_spark_with_delta_pip
 
 from src.bronze import ingest_bronze
+from src.silver import transform_silver
 
 
 def get_spark_session(app_name: str = "HealthTechLakehouse") -> SparkSession:
@@ -29,7 +30,7 @@ def get_spark_session(app_name: str = "HealthTechLakehouse") -> SparkSession:
 
 
 def main():
-    """Executa o fluxo de ingestão da Camada Bronze."""
+    """Executa o fluxo completo Bronze -> Silver do HealthTech Lakehouse."""
     print("\n" + "=" * 70)
     print("  🚀 INICIANDO EXECUÇÃO LOCAL DO HEALTHTECH DATA LAKEHOUSE")
     print("=" * 70 + "\n")
@@ -41,23 +42,32 @@ def main():
     # 2. Definir caminhos de armazenamento
     base_dir = os.path.dirname(os.path.abspath(__file__))
     path_bronze = os.path.join(base_dir, "storage", "bronze")
+    path_silver = os.path.join(base_dir, "storage", "silver")
 
     # 3. Executar Ingestão Bronze
-    total_records = ingest_bronze(spark, path_bronze, num_records=500)
+    total_bronze = ingest_bronze(spark, path_bronze, num_records=500)
 
-    # 4. Inspecionar e validar os dados gravados na Bronze
-    print("\n🔍 Inspecionando os primeiros 5 registros gravados no Delta Lake (Bronze):")
-    df_read_bronze = spark.read.format("delta").load(path_bronze)
-    df_read_bronze.select(
-        "admission_id", "patient_name", "hospital_id",
-        "bed_type", "specialty", "daily_cost"
+    # 4. Executar Transformação Silver
+    total_silver = transform_silver(spark, path_bronze, path_silver)
+
+    # 5. Inspecionar e validar os dados enriquecidos na Silver
+    print("\n🔍 Inspecionando 5 registros curados na Camada Silver (com métricas calculadas):")
+    df_read_silver = spark.read.format("delta").load(path_silver)
+    df_read_silver.select(
+        "admission_id", "hospital_id", "bed_type",
+        "length_of_stay_days", "daily_cost", "total_treatment_cost",
+        "is_critical_care", "is_currently_admitted"
     ).show(5, truncate=False)
 
-    print("\n📊 Contagem de pacientes por Hospital na Bronze:")
-    df_read_bronze.groupBy("hospital_id", "hospital_name").count().show(truncate=False)
+    print("\n📊 Métricas Agregadas por Especialidade na Silver:")
+    df_read_silver.groupBy("specialty").agg(
+        {"length_of_stay_days": "avg", "total_treatment_cost": "sum"}
+    ).withColumnRenamed("avg(length_of_stay_days)", "media_dias_internado") \
+     .withColumnRenamed("sum(total_treatment_cost)", "custo_total_especialidade") \
+     .show(truncate=False)
 
     print("\n" + "=" * 70)
-    print(f"  ✨ PIPELINE BRONZE CONCLUÍDO COM SUCESSO! ({total_records} registros)")
+    print(f"  ✨ PIPELINE BRONZE & SILVER CONCLUÍDO COM SUCESSO! ({total_silver} registros)")
     print("=" * 70 + "\n")
 
 
