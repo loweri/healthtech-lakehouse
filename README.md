@@ -13,9 +13,17 @@
 
 ---
 
+## 🏗️ Architecture Blueprint / Diagrama de Arquitetura
+
+<p align="center">
+  <img src="docs/architecture_blueprint.png" alt="HealthTech Lakehouse Architecture Blueprint" width="100%">
+</p>
+
+---
+
 ## 🇧🇷 Português
 
-Este projeto implementa uma plataforma completa de **Data Lakehouse para Gestão Hospitalar & Cuidados Críticos (UTI)** sob a **Arquitetura Medalhão** (Bronze ➔ Silver ➔ Gold). A solução integra processamento distribuído massivo em **PySpark**, armazenamento colunar ACID resiliente em **Delta Lake**, orquestração automatizada no **Apache Airflow 3**, validação por suíte de testes em **Pytest** e um painel executivo interativo em **Streamlit & Plotly**.
+Este projeto implementa uma plataforma completa de **Data Lakehouse para Gestão Hospitalar & Cuidados Críticos (UTI)** sob a **Arquitetura Medalhão** (Bronze ➔ Silver ➔ Gold). A solução integra processamento distribuído massivo em **PySpark**, armazenamento colunar ACID resiliente em **Delta Lake**, modelagem dimensional **Star Schema (Kimball)**, orquestração automatizada no **Apache Airflow 3**, validação por suíte de testes em **Pytest** e um painel executivo interativo em **Streamlit & Plotly**.
 
 ---
 
@@ -29,8 +37,8 @@ Este projeto implementa uma plataforma completa de **Data Lakehouse para Gestão
   <img src="docs/streamlit_dashboard_2.png" alt="Top Diagnósticos CID-10 e Proporção por Tipo de Leito" width="100%">
 </p>
 
-- **KPIs em Tempo Real:** Total de internações, taxa de ocupação de leitos de UTI (com alerta visual para saturação > 30%), tempo médio de permanência e custo total acumulado.
-- **Análises Clínicas:** Ranking de hospitais com maior demanda crítica, distribuição de custos por especialidade médica, patologias mais frequentes (CID-10) e proporção por tipo de leito.
+- **KPIs em Tempo Real:** Total de internações (1.000 pacientes), taxa de ocupação de leitos de UTI (32.8% com alerta de saturação > 30%), tempo médio de permanência e custo total acumulado (R$ 2.868.012,30).
+- **Análises Clínicas:** Ranking de hospitais com maior demanda crítica (Hospital São Lucas SP no topo), distribuição de custos por especialidade médica (Pediatria e Pneumologia), patologias mais frequentes (Top CIDs) e proporção por tipo de leito (Donut Chart).
 
 ---
 
@@ -40,63 +48,8 @@ Este projeto implementa uma plataforma completa de **Data Lakehouse para Gestão
   <img src="docs/airflow_execution.png" alt="Execução com Sucesso da DAG no Apache Airflow 3" width="100%">
 </p>
 
-- **DAG:** `healthtech_lakehouse_pyspark_pipeline` (Execução em 54 segundos com 100% de sucesso).
+- **DAG:** `healthtech_lakehouse_pyspark_pipeline` (Execução completa em 54 segundos com 100% de sucesso).
 - **Padrão Lazy Imports:** Importação sob demanda das dependências da JVM para isolar tarefas e prevenir sobrecarga no Scheduler do Airflow.
-
----
-
-### 🏗️ Tech Stack Blueprint: Arquitetura de Dados End-to-End
-
-```mermaid
-flowchart TD
-    subgraph S1 ["🎲 ESTÁGIO 1: ORIGEM DOS DADOS"]
-        FAKER["Biblioteca Faker (Python)\n• Prontuários Médicos & Pacientes (PT-BR)\n• Diagnósticos CID-10 & Tipos de Leito\n• Simulação de APIs Hospitalares REST"]
-    end
-
-    subgraph S2 ["🥉 ESTÁGIO 2: INGESTÃO BRUTA (CAMADA BRONZE)"]
-        SCHEMA["Schema Enforcement Estrito (StructType)\nValidação de Tipos & Nullable"]
-        DELTA_BRONZE["storage/bronze/\n(Delta Table · Partição: hospital_id)\nTransaction Log ACID (_delta_log)"]
-        FAKER -->|Dados Brutos| SCHEMA
-        SCHEMA -->|Gravação Atômica| DELTA_BRONZE
-    end
-
-    subgraph S3 ["🥈 ESTÁGIO 3: LIMPEZA & ENRIQUECIMENTO (CAMADA SILVER)"]
-        PY_SILVER["src/silver.py (PySpark Engine)\n• Deduplicação (dropDuplicates por admission_id)\n• Normalização de Datas (to_date YYYY-MM-DD)\n• Feature Engineering: Dias de Permanência\n• Cálculo do Custo de Tratamento & Flag UTI"]
-        DELTA_SILVER["storage/silver/\n(Delta Table · Partição: hospital_id)"]
-        DELTA_BRONZE --> PY_SILVER
-        PY_SILVER -->|Delta Overwrite Particionado| DELTA_SILVER
-    end
-
-    subgraph S4 ["🥇 ESTÁGIO 4: DATA WAREHOUSE & MODELAGEM (CAMADA GOLD)"]
-        PY_GOLD["src/gold.py (Modelagem Star Schema / Kimball)"]
-        FACT["🥇 storage/gold/fact_hospital_occupancy/\n(Tabela Fato · Partição: year_month)"]
-        DIM_HOSP["dim_hospitals (Capacidade & Gastos)"]
-        DIM_SPEC["dim_specialties (Custo por Especialidade)"]
-
-        DELTA_SILVER --> PY_GOLD
-        PY_GOLD --> FACT
-        PY_GOLD --> DIM_HOSP
-        PY_GOLD --> DIM_SPEC
-    end
-
-    subgraph S5 ["⚡ ESTÁGIO 5: ORQUESTRAÇÃO"]
-        AIRFLOW["Apache Airflow 3 (Web UI)\nDAG: healthtech_lakehouse_pyspark_pipeline\n(Lazy Imports & Políticas de Retry)"]
-        AIRFLOW -.->|Task 1| S2
-        AIRFLOW -.->|Task 2| S3
-        AIRFLOW -.->|Task 3| S4
-    end
-
-    subgraph S6 ["🛡️ ESTÁGIO 6: QUALIDADE & TESTES"]
-        PYTEST["Pytest Testing Suite (tests/test_silver.py)\n• Padrão AAA (Arrange, Act, Assert)\n• Fixtures de Spark & Diretórios Temporários\n• Validação de Contratos Clínicos"]
-    end
-
-    subgraph S7 ["📊 ESTÁGIO 7: CONSUMO & ANALYTICS"]
-        STREAMLIT["Streamlit & Plotly (app.py)\n• Painel Executivo Dark Mode\n• Filtros Dinâmicos por Hospital e Especialidade"]
-        FACT --> STREAMLIT
-        DIM_HOSP --> STREAMLIT
-        DIM_SPEC --> STREAMLIT
-    end
-```
 
 ---
 
@@ -136,6 +89,7 @@ healthtech-lakehouse/
 │   └── test_silver.py             # Suíte de testes unitários automatizados (Pytest)
 │
 ├── docs/
+│   ├── architecture_blueprint.png # Diagrama oficial de arquitetura End-to-End
 │   ├── airflow_execution.png      # Evidência de execução 100% verde no Airflow
 │   ├── streamlit_dashboard_1.png  # Evidência do Dashboard (KPIs e Rankings)
 │   └── streamlit_dashboard_2.png  # Evidência do Dashboard (CIDs e Leitos)
@@ -191,6 +145,7 @@ Enterprise-grade **HealthTech Data Lakehouse** built upon the **Medallion Archit
 
 ### 🌟 Key Highlights
 
+- **Architecture Blueprint:** End-to-end data pipeline connecting hospital EHR data sources, Bronze ingestion, Silver PySpark feature engineering, Gold Kimball Star Schema, Airflow orchestration, and Streamlit consumption.
 - **Distributed Data Engine:** PySpark for processing large-scale hospital admission records without memory bottlenecks.
 - **ACID Transaction Log:** Delta Lake table format enabling reliable writes, schema enforcement, and time travel capabilities.
 - **Dimensional Modeling (Star Schema):** Curated Fact Table (`fact_hospital_occupancy`) partitioned by `year_month` coupled with dimension tables (`dim_hospitals`, `dim_specialties`).
