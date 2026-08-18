@@ -110,6 +110,9 @@ flowchart TD
 | **Modelagem Star Schema (Kimball)** | Separação estrita entre métricas numéricas agregáveis (`fact_hospital_occupancy` no centro) e tabelas de contexto descritivo (`dim_hospitals`, `dim_specialties` ao redor). |
 | **Lazy Imports no Airflow 3** | Mover as importações de PySpark para dentro dos callables das tarefas evita que o Scheduler inicialize a JVM em cada ciclo de parsing (a cada 30 segundos). |
 | **Padrão AAA nos Testes Unitários** | Testes isolados com `pytest` utilizando pastas descartáveis (`tmp_path`) e asserções estritas com `assert` sem impactar os dados reais de produção. |
+| **`PROJECT_DIR` Dinâmico na DAG (Portabilidade)** | O path raiz do projeto é resolvido via cascata: variável de ambiente `HEALTHTECH_PROJECT_DIR` → `Path(__file__).parent.parent` → fallback `~/github/healthtech-lakehouse`. Elimina o path hardcoded que causava `ModuleNotFoundError: No module named 'src'` em qualquer máquina diferente da do autor. |
+| **`JAVA_HOME` Injetado via `os.environ` na DAG** | O Airflow 3 (`LocalExecutor`) inicia workers como subprocessos que não herdam variáveis do shell. O `JAVA_HOME` é injetado programaticamente em `os.environ` dentro do callable, garantindo que a JVM seja encontrada independentemente de como o Airflow foi iniciado. |
+| **`dags_folder` Apontando para o Repositório** | Em vez de copiar o DAG para `~/airflow/dags/`, o `airflow.cfg` aponta diretamente para `<repo>/dags/`. Isso garante que `__file__` dentro do DAG resolva para o path correto do repositório, evitando quebra do `sys.path`. |
 
 ---
 
@@ -119,6 +122,7 @@ flowchart TD
 healthtech-lakehouse/
 ├── .venv/                         # Ambiente Virtual Local
 ├── README.md                      # Documentação completa do projeto
+├── SETUP_LOCAL.md                 # Guia de setup local e registro de correções (PR)
 ├── requirements.txt               # Dependências do projeto
 ├── main.py                        # Ponto de entrada para execução e validação local
 ├── app.py                         # Painel Executivo Interativo (Streamlit & Plotly)
@@ -150,13 +154,43 @@ healthtech-lakehouse/
 
 ### 🚀 Como Executar o Projeto
 
+> **Dica:** Para um guia detalhado de setup em ambientes Debian/Ubuntu e registro completo de correções, consulte o [SETUP_LOCAL.md](./SETUP_LOCAL.md).
+
+#### Pré-requisitos
+
+| Dependência | Versão | Notas |
+| :--- | :--- | :--- |
+| Python | 3.12+ / 3.14 | Testado com 3.14.4 |
+| **Java (JDK)** | **17** | **Obrigatório para PySpark. Não incluído no `requirements.txt`.** |
+| `virtualenv` | qualquer | Necessário em Debian/Ubuntu — substitui `python3 -m venv` (ver passo 1) |
+
 #### 1. Clonar o repositório e preparar o ambiente
+
 ```bash
 git clone https://github.com/loweri/healthtech-lakehouse.git
 cd healthtech-lakehouse
+```
 
-python3 -m venv .venv
+**Instalar o Java 17** (pré-requisito do PySpark — sem necessidade de `sudo`):
+```bash
+mkdir -p ~/.jdk17
+curl -sL "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.12_7.tar.gz" \
+  | tar -xz -C ~/.jdk17 --strip-components=1
+export JAVA_HOME="$HOME/.jdk17"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+> Adicione as duas linhas `export` ao `~/.bashrc` ou `~/.zshrc` para persistir entre sessões.
+
+**Criar o ambiente virtual e instalar dependências:**
+
+```bash
+# Em sistemas Debian/Ubuntu, o módulo 'venv' pode não estar disponível.
+# Use 'virtualenv' como alternativa portável:
+python3 -m pip install --user virtualenv --break-system-packages
+python3 -m virtualenv .venv
 source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
@@ -177,11 +211,26 @@ streamlit run app.py
 Acesse `http://localhost:8501` no navegador.
 
 #### 5. Executar no Apache Airflow 3
+
+O DAG já está em `dags/` do repositório. Configure o Airflow para lê-lo diretamente, sem necessidade de copiar o arquivo:
+
 ```bash
-cp dags/healthtech_lakehouse_dag.py ~/airflow/dags/
+# Aponta o dags_folder diretamente para o repositório (execute uma única vez)
+sed -i "s|dags_folder = .*|dags_folder = $(pwd)/dags|" ~/airflow/airflow.cfg
+
+# Iniciar o Airflow com as variáveis necessárias
+export JAVA_HOME="$HOME/.jdk17"
+export PATH="$JAVA_HOME/bin:$PATH"
+export HEALTHTECH_PROJECT_DIR="$(pwd)"
+
 airflow standalone
 ```
-Acesse `http://localhost:8080`, ative a DAG `healthtech_lakehouse_pyspark_pipeline` e clique em **Trigger DAG** ▶️.
+
+Acesse `http://localhost:8080`. A senha do admin está em:
+```bash
+cat ~/airflow/simple_auth_manager_passwords.json.generated
+```
+Acesse a DAG `healthtech_lakehouse_pyspark_pipeline` e clique em **Trigger DAG** ▶️.
 
 ---
 
@@ -189,14 +238,17 @@ Acesse `http://localhost:8080`, ative a DAG `healthtech_lakehouse_pyspark_pipeli
 
 Enterprise-grade **HealthTech Data Lakehouse** built upon the **Medallion Architecture** (Bronze ➔ Silver ➔ Gold). The platform couples distributed processing via **Apache Spark (PySpark)** with ACID guarantees and Time Travel features of **Delta Lake**, fully orchestrated by **Apache Airflow 3**, validated through **Pytest** automated testing, and visualized via an interactive **Streamlit & Plotly** executive dashboard.
 
+> **Setup Guide:** See [SETUP_LOCAL.md](./SETUP_LOCAL.md) for a complete local setup guide, including Debian/Ubuntu-specific instructions and a record of all bug fixes applied.
+
 ### 🌟 Key Highlights
 
 - **Distributed Data Engine:** PySpark for processing large-scale hospital admission records without memory bottlenecks.
 - **ACID Transaction Log:** Delta Lake table format enabling reliable writes, schema enforcement, and time travel capabilities.
 - **Dimensional Modeling (Star Schema):** Curated Fact Table (`fact_hospital_occupancy`) partitioned by `year_month` coupled with dimension tables (`dim_hospitals`, `dim_specialties`).
-- **Airflow 3 Orchestration:** DAG utilizing Lazy Imports for lightweight scheduler parsing cycles and robust task dependency management.
+- **Airflow 3 Orchestration:** DAG utilizing Lazy Imports for lightweight scheduler parsing cycles and robust task dependency management. `PROJECT_DIR` resolved dynamically (portable across machines). `JAVA_HOME` injected at runtime into worker `os.environ`.
 - **Automated Unit Testing:** Pytest suite with isolated Spark fixtures validating length of stay calculations, ICU flags, and cost metrics.
 - **Executive Analytics:** Streamlit dark-mode dashboard with dynamic hospital filters, ICU capacity alerts, and diagnostic distributions.
+- **Java 17 (JDK):** Required by PySpark — install via [Eclipse Temurin](https://adoptium.net/) without `sudo` (see setup guide).
 
 ---
 
